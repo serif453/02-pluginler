@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.7). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.8). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -235,7 +235,10 @@ function readRecords(html) {
     if (!lastKeys) lastKeys = Object.keys(pairs).join(' ') + ' | ilk: ' + (pairs.t || '') + ' tid=' + (pairs.tid || '') + ' orig=' + (pairs.orig || '');
     var img = pairs.img || pairs.poster || pairs.image || pairs.cover || '';
     if (!img) continue;
-    // Kayıttaki adres olduğu gibi (1.0.5): sitenin büyük resim sunucusu başka uygulamaya resim vermiyor.
+    // 1.0.8: kayıttaki resim küçük bir önbellek kopyası (yarısı açılmıyordu). Sitenin kendi 384x576 resmi kullanılır; resim
+    // sunucusu yalnızca siteden istenince verdiği için uygulama isteğe "şu siteden" bilgisini ekler (posterReferer).
+    var big = /images\.macellan\.online\/images\/tv\/poster\/(?:[^\/"]+\/){1,3}([^\/"?#]+)$/.exec(img);
+    if (big) img = 'https://images.macellan.online/images/tv/poster/384/576/80/' + big[1];
     seen[slug] = true;
     var titleKey = ['title', 'name', 'tr_title', 'title_tr', 'trTitle', 'original_title', 'originalTitle', 'original_name', 'baslik', 't', 'n']
       .filter(function (k) { return typeof pairs[k] === 'string' && /[A-Za-zÇĞİÖŞÜçğıöşü0-9]/.test(pairs[k]) && !/^\//.test(pairs[k]); })[0];
@@ -250,7 +253,7 @@ function readRecords(html) {
       var v = parseFloat(pairs[k]); if (v > 0 && v <= 10) { rating = String(v); return true; } return false;
     });
     items.push({
-      title: title, year: year, poster: absolute(img), rating: rating, score: '', scoreLabel: '',
+      title: title, year: year, poster: absolute(img), posterReferer: root() + '/', rating: rating, score: '', scoreLabel: '',
       imdb: (/(tt\d{5,10})/.exec(obj) || [])[1] || null
     });
   }

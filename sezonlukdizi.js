@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -11,7 +11,7 @@
 var BASE = 'https://sezonlukdizi.cc';
 var origin = null;
 // Son isteğin özeti (uygulamanın testinde ve boş listede görünür): cevap kodu, boyut, sayfa başlığı, sunucu.
-var last = { status: 0, size: 0, title: '', host: '', server: '' };
+var last = { status: 0, size: 0, title: '', host: '', server: '', cf: '' };
 
 var LABELS = { adi: 'Dizi adı', kat: 'Kategori', tur: 'Tür', ulke: 'Ülke', tv: 'TV kanalı', durum: 'Dizi durumu', dil: 'Dil' };
 var SELECT_ORDER = ['kat', 'tur', 'ulke', 'tv', 'durum', 'dil'];
@@ -35,12 +35,14 @@ async function getPage(path) {
   last.title = plain((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(text) || [])[1] || '').slice(0, 80);
   try { last.host = new URL(res.url || root()).hostname; } catch (e) { last.host = ''; }
   last.server = (res.headers && res.headers.get('server')) || '';
+  last.cf = (res.headers && res.headers.get('x-02-cf')) || '';
   return text;
 }
 
 function debugLine(extra) {
   return 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
-    (last.server ? ' · sunucu ' + last.server : '') + ' · başlık "' + (last.title || '-') + '"' + (extra ? ' · ' + extra : '');
+    (last.server ? ' · sunucu ' + last.server : '') + (last.cf ? ' · ' + last.cf : '') + ' · başlık "' + (last.title || '-') + '"' +
+    (extra ? ' · ' + extra : '');
 }
 
 function decode(text) {

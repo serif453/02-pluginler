@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -131,26 +131,35 @@ function number(text) {
   return m ? m[1].replace(',', '.') : '';
 }
 
-/** Afiş görünümündeki kartlar (div.afis > a: resim data-src, ad div.description). */
+/**
+ * Afiş görünümündeki kartlar: `div.afis` bütün afişleri saran kutudur (1.0.3; 1.0.2 her afişi ayrı kutu sanıyordu), her dizi
+ * içindeki bir bağlantıdır (resim data-src, ad div.description, rozetlerde SDP / IMDb ve yıl).
+ */
 function readCards(html) {
   var items = [];
-  var parts = html.split(/<div[^>]*class=["'][^"']*\bafis\b[^"']*["'][^>]*>/i);
-  for (var i = 1; i < parts.length; i++) {
-    var chunk = parts[i].slice(0, 6000);
-    var title = plain((/class=["'][^"']*\bdescription\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i.exec(chunk) || [])[1]) ||
-      decode((/<img[^>]*\balt=["']([^"']+)["']/i.exec(chunk) || [])[1] || '').trim();
-    if (!title) continue;
-    var poster = (/data-src=["']([^"']+)["']/i.exec(chunk) || /<img[^>]*\bsrc=["']([^"']+)["']/i.exec(chunk) || [])[1];
-    var text = plain(chunk);
-    var year = (/\b(19[3-9]\d|20[0-4]\d)\b/.exec(text) || [])[1] || '';
+  var start = html.search(/<div[^>]*class=["'][^"']*\bafis\b[^"']*["'][^>]*>/i);
+  if (start < 0) return items;
+  var area = html.slice(start, start + 600000);
+  var end = area.search(/class=["'][^"']*\b(pagination|sayfalama)\b/i);
+  if (end > 0) area = area.slice(0, end);
+  var re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, m, seen = {};
+  while ((m = re.exec(area))) {
+    var inner = m[2];
+    if (!/description|<img/i.test(inner)) continue;
+    var title = plain((/class=["'][^"']*\bdescription\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i.exec(inner) || [])[1]) ||
+      decode((/<img[^>]*\balt=["']([^"']+)["']/i.exec(inner) || [])[1] || '').trim();
+    if (!title || seen[m[1]]) continue;
+    seen[m[1]] = true;
+    var poster = (/data-src=["']([^"']+)["']/i.exec(inner) || /<img[^>]*\bsrc=["']([^"']+)["']/i.exec(inner) || [])[1];
+    var text = plain(inner);
     items.push({
       title: title,
-      year: year,
+      year: (/\b(19[3-9]\d|20[0-4]\d)\b/.exec(text) || [])[1] || '',
       poster: absolute(poster),
       rating: number((/IMDb\s*:?\s*([0-9]+[.,][0-9])/i.exec(text) || [])[0]),
       score: number((/SDP\s*:?\s*([0-9]+[.,][0-9])/i.exec(text) || [])[0]),
       scoreLabel: 'SDP',
-      imdb: ((/(tt\d{5,10})/.exec(chunk) || [])[1]) || null
+      imdb: ((/(tt\d{5,10})/.exec(inner) || [])[1]) || null
     });
   }
   return items;
@@ -211,9 +220,8 @@ async function getCatalog(query, page) {
   } catch (e) {
     return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
   }
-  var cards = (html.match(/class=["'][^"']*\bafis\b/gi) || []).length;
   var items = readCards(html);
-  var how = 'afiş ' + items.length + '/' + cards;
+  var how = 'afiş ' + items.length;
   if (!items.length) { items = readLinks(html); how += ' · yedek ' + items.length; }
   var next = String((page || 1) + 1);
   var hasMore = new RegExp('[?&;]s=' + next + '(?![0-9])').test(html.replace(/&amp;/g, '&'));

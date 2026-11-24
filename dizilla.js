@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.0). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.1). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -96,16 +96,17 @@ function readCards(html) {
   // Kartlar "N sonuç" yazısından sonra başlar (üstteki menü ve filtre bağlantıları atlanır).
   var at = html.search(/\d[\d.]*\s*sonu[çc]/i);
   var area = at > 0 ? html.slice(at) : html;
-  var re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,4000}?)<\/a>/gi, m;
+  var re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,15000}?)<\/a>/gi, m;
   while ((m = re.exec(area))) {
     var href = m[1], inner = m[2];
-    if (!/<img/i.test(inner)) continue;
+    if (!/<img|<picture|srcset=|background-image/i.test(inner)) continue;
     if (/ne-izlesem|\/(oyuncu|dizi-turu|kategori|takvim|reels|akis|giris|kayit|uye)\b/i.test(href)) continue;
     var title = plain((/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i.exec(inner) || [])[1]) ||
       decode((/<img[^>]*\balt=["']([^"']+)["']/i.exec(inner) || [])[1] || '').trim();
     if (!title || title.length > 150 || seen[href]) continue;
     seen[href] = true;
-    var poster = (/data-src=["']([^"']+)["']/i.exec(inner) || /<img[^>]*\bsrc=["']([^"']+)["']/i.exec(inner) || [])[1];
+    var poster = (/data-src=["']([^"']+)["']/i.exec(inner) || /<img[^>]*\bsrc=["']([^"']+)["']/i.exec(inner) ||
+      /background-image:\s*url\(["']?([^"')]+)/i.exec(inner) || [])[1];
     var srcset = (/srcset=["']([^"' ]+)/i.exec(inner) || [])[1];
     var text = plain(inner);
     var rating = (/(?:^|\s)(\d{1,2}[.,]\d)(?:\s|$)/.exec(text) || [])[1] || '';
@@ -120,6 +121,38 @@ function readCards(html) {
     });
   }
   return items;
+}
+
+/**
+ * Yedek yol (1.0.1): sonuçlar sayfanın içindeki veri bloğunda (Next.js: __NEXT_DATA__ ya da self.__next_f) duruyorsa
+ * ad ve afiş oradan okunur. Veri kaçışlı yazılır (\\"), önce çözülür.
+ */
+function readData(html) {
+  var text = html.replace(/\\\\"/g, '"').replace(/\\"/g, '"').replace(/\\\//g, '/').replace(/\\u0026/g, '&');
+  var items = [], seen = {}, m;
+  var re = /\{[^{}]{0,1500}?"(?:title|name|original_name|originalName)"\s*:\s*"([^"]{1,150})"[^{}]{0,1500}?\}/g;
+  while ((m = re.exec(text))) {
+    var obj = m[0];
+    var poster = (/"(?:poster|posterPath|poster_path|posterUrl|cover|image|thumbnail)"\s*:\s*"([^"]+)"/.exec(obj) || [])[1];
+    if (!poster) continue;
+    var title = decode(m[1]).trim();
+    if (!title || seen[title]) continue;
+    seen[title] = true;
+    var year = (/"(?:year|releaseYear|first_air_date|firstAirDate|release_date|startYear)"\s*:\s*"?(\d{4})/.exec(obj) || [])[1] || '';
+    var rating = (/"(?:imdb|imdbRating|imdb_rating|rating|vote_average|imdbScore)"\s*:\s*"?(\d{1,2}(?:\.\d)?)/.exec(obj) || [])[1] || '';
+    var imdb = (/"(?:imdb_id|imdbId|imdbID)"\s*:\s*"(tt\d{5,10})"/.exec(obj) || [])[1] || null;
+    if (/^\//.test(poster) && /poster_path/.test(obj)) poster = 'https://image.tmdb.org/t/p/w342' + poster;
+    items.push({ title: title, year: year, poster: absolute(poster), rating: rating, score: '', scoreLabel: '', imdb: imdb });
+  }
+  return items;
+}
+
+/** Sayfanın yapısı (teşhis satırı): bağlantı, resim ve veri bloğu sayıları. */
+function structure(html) {
+  function count(re) { return (html.match(re) || []).length; }
+  return 'a ' + count(/<a\b/gi) + ', img ' + count(/<img\b/gi) + ', picture ' + count(/<picture\b/gi) +
+    ', next_data ' + count(/__NEXT_DATA__/g) + ', next_f ' + count(/self\.__next_f/g) + ', poster ' + count(/poster/gi) +
+    ', h2 ' + count(/<h2\b/gi) + ', h3 ' + count(/<h3\b/gi);
 }
 
 async function getCatalog(query, page) {
@@ -137,7 +170,8 @@ async function getCatalog(query, page) {
   } catch (e) {
     return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
   }
-  var items = readCards(html);
+  var items = readCards(html), how = 'kart';
+  if (!items.length) { items = readData(html); how = 'veri'; }
   // Sayfa arttıkça önceki diziler de geliyorsa (birikerek), yalnızca bu sayfanınkiler alınır.
   if (page > 1 && items.length > 40) {
     var per = Math.round(items.length / page);
@@ -148,7 +182,7 @@ async function getCatalog(query, page) {
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
     (last.cf ? ' · ' + last.cf : '') + (items.length ? '' : ' · başlık "' + (last.title || '-') + '"') +
-    ' · afiş ' + items.length + ' · toplam ' + total;
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? '' : ' · yapı: ' + structure(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

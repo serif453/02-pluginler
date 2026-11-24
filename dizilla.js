@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.2). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.3). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -173,6 +173,47 @@ function readData(html) {
   return items;
 }
 
+/**
+ * 1.0.3: "poster" alan adı değil, resim adresinin içinde (…/poster/x.webp). Her böyle adresin yakınındaki ad alanı
+ * (title/name) ya da resmin alt yazısı alınır.
+ */
+function readPosterUrls(html) {
+  var text = unescapeData(html);
+  var items = [], seen = {}, seenUrl = {}, m;
+  var re = /(https?:\/\/[^"'\s\\<>()]*poster[^"'\s\\<>()]*|\/[^"'\s\\<>()]*poster[^"'\s\\<>()]*\.(?:webp|jpe?g|png|avif))/gi;
+  while ((m = re.exec(text))) {
+    var url = m[1], at = m.index;
+    if (seenUrl[url]) continue;
+    seenUrl[url] = true;
+    var from = Math.max(0, at - 1500), win = text.slice(from, at + 1500);
+    var best = null, bestDist = 1e9, pm;
+    var pre = /"(title|original_?title|title_?tr|name|original_?name|baslik)"\s*:\s*"([^"]{1,150})"|\balt=["']([^"']{1,150})["']/gi;
+    while ((pm = pre.exec(win))) {
+      var d = Math.abs(from + pm.index - at);
+      // "name" alanında tür / ülke adı olabilir: başlık alanları ve alt yazı öne alınır.
+      if (pm[1] && /^name|original_?name$/i.test(pm[1])) d += 400;
+      if (d < bestDist) { bestDist = d; best = pm[2] || pm[3]; }
+    }
+    if (!best) continue;
+    var title = decode(best).trim();
+    if (!title || seen[title] || /dizilla|logo/i.test(title)) continue;
+    seen[title] = true;
+    var near = text.slice(Math.max(0, at - 800), at + 800);
+    var y = (/"[A-Za-z_]*(?:year|yil|date|tarih)[A-Za-z_]*"\s*:\s*"?((?:19|20)\d\d)/i.exec(near) || [])[1] || '';
+    var r = (/"[A-Za-z_]*(?:imdb|rating|puan|score)[A-Za-z_]*"\s*:\s*"?(\d(?:\.\d)?)/i.exec(near) || [])[1] || '';
+    items.push({ title: title, year: y, poster: absolute(url), rating: r, score: '', scoreLabel: '', imdb: (/(tt\d{5,10})/.exec(near) || [])[1] || null });
+  }
+  return items;
+}
+
+/** İlk "poster" geçen yerin çevresi (teşhis için; sitenin herkese açık katalog verisi). */
+function posterSnippet(html) {
+  var text = unescapeData(html);
+  var at = text.search(/poster/i);
+  if (at < 0) return 'yok';
+  return text.slice(Math.max(0, at - 110), at + 70).replace(/\s+/g, ' ');
+}
+
 /** İlk "poster" alanının yakınındaki alan adları (yalnızca adlar; teşhis satırı için). */
 function keysNearPoster(html) {
   var text = unescapeData(html);
@@ -208,6 +249,7 @@ async function getCatalog(query, page) {
   }
   var items = readCards(html), how = 'kart';
   if (!items.length) { items = readData(html); how = 'veri'; }
+  if (!items.length) { items = readPosterUrls(html); how = 'resim adresi'; }
   // Sayfa arttıkça önceki diziler de geliyorsa (birikerek), yalnızca bu sayfanınkiler alınır.
   if (page > 1 && items.length > 40) {
     var per = Math.round(items.length / page);
@@ -217,8 +259,8 @@ async function getCatalog(query, page) {
   var tm = /(\d[\d.]*)\s*sonu[çc]/i.exec(plain(html));
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
-    (last.cf ? ' · ' + last.cf : '') + (items.length ? '' : ' · başlık "' + (last.title || '-') + '"') +
-    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? '' : ' · alanlar: ' + keysNearPoster(html));
+    (last.cf ? ' · ' + last.cf : '') +
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (how === 'kart' && items.length ? '' : ' · çevre: ' + posterSnippet(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

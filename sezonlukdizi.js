@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek; 1.0.5: kutular kimlik ve benzer adla bulunuyor). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -71,7 +71,8 @@ function readSelects(html) {
   var re = /<select([^>]*)>([\s\S]*?)<\/select>/gi, m;
   while ((m = re.exec(html))) {
     var attrs = m[1];
-    var name = (/\bname=["']?([^"'\s>]+)/i.exec(attrs) || [])[1];
+    // Ad yoksa kimlik (bazı kutuların değerini sayfanın kodu adrese yazar, kutunun adı olmaz).
+    var name = (/\bname=["']?([^"'\s>]+)/i.exec(attrs) || [])[1] || (/\bid=["']?([^"'\s>]+)/i.exec(attrs) || [])[1];
     if (!name) continue;
     name = name.replace(/\[\]$/, '');
     // Seçenekler kapanış etiketi olmadan da yazılabilir (<option value=1>Yabancı): yazı bir sonraki etikete kadar okunur.
@@ -87,6 +88,27 @@ function readSelects(html) {
     out[name] = { multiple: /\bmultiple\b/i.test(attrs), options: options };
   }
   return out;
+}
+
+/** Adres adı -> kutunun sayfadaki olası adları (adı ya da kimliği bunlardan biriyle başlıyorsa o kutu). */
+var ALIASES = {
+  kat: ['kat', 'kategori'],
+  tur: ['tur', 'tür', 'genre'],
+  ulke: ['ulke', 'ülke', 'country'],
+  tv: ['tv', 'kanal', 'network'],
+  durum: ['durum', 'status'],
+  dil: ['dil', 'lang']
+};
+
+function findSelect(selects, key) {
+  if (selects[key]) return selects[key];
+  var names = Object.keys(selects);
+  for (var i = 0; i < names.length; i++) {
+    var n = names[i].toLowerCase().replace(/[^a-zçğıöşü]/g, '');
+    if (/siralama|sirala|ps$/.test(n)) continue;
+    if (ALIASES[key].some(function (a) { return n.indexOf(a) === 0; })) return selects[names[i]];
+  }
+  return null;
 }
 
 /** Sıralama sekmeleri (IMDb, SDP, Alfabetik, Yıl...): siralama_tipi=... bağlantıları ya da açılır kutusu. */
@@ -126,7 +148,9 @@ function harvest(html, name) {
 /** Kutuların okunan seçenek sayıları (teşhis satırı için). */
 function selectSummary(html) {
   var selects = readSelects(html);
-  return SELECT_ORDER.map(function (name) { return name + ' ' + (selects[name] ? selects[name].options.length : '-'); }).join(', ');
+  var found = SELECT_ORDER.map(function (name) { var sel = findSelect(selects, name); return name + ' ' + (sel ? sel.options.length : '-'); }).join(', ');
+  var all = Object.keys(selects).map(function (n) { return n + '(' + selects[n].options.length + ')'; }).join(' ');
+  return found + ' · sayfadaki kutular: ' + (all || 'yok');
 }
 
 async function getFilters() {
@@ -134,7 +158,7 @@ async function getFilters() {
   var selects = readSelects(html);
   var filters = [{ id: 'adi', label: LABELS.adi, kind: 'text' }];
   SELECT_ORDER.forEach(function (name) {
-    var sel = selects[name];
+    var sel = findSelect(selects, name);
     var options = sel && sel.options.length ? sel.options : harvest(html, name);
     if (!options.length && name === 'kat') options = KAT_FALLBACK;
     if (!options.length) return;
@@ -253,7 +277,9 @@ async function getCatalog(query, page) {
   var total = -1;
   var tm = /([0-9][0-9.]*)\s*(?:adet\s*)?dizi\s*(?:bulundu|listelendi)/i.exec(plain(html));
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
-  return { items: items, hasMore: hasMore || items.length >= 50, total: total, debug: debugLine(how) };
+  // Afiş geldiyse kısa satır (uygulama satırı 300 harfte keser; kutu adları sona sığsın).
+  var debug = items.length ? 'kod ' + last.status + ' · ' + (last.cf ? last.cf + ' · ' : '') + how : debugLine(how);
+  return { items: items, hasMore: hasMore || items.length >= 50, total: total, debug: debug };
 }
 
 module.exports = { getFilters: getFilters, getCatalog: getCatalog };

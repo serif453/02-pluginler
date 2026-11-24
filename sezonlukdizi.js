@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek; 1.0.5: kutular kimlik ve benzer adla bulunuyor; 1.0.6: sitenin süslü kutuları (Semantic UI)). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek; 1.0.5: kutular kimlik ve benzer adla bulunuyor; 1.0.6: sitenin süslü kutuları (Semantic UI); 1.0.7: toplam sonuç sayısı). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -309,9 +309,27 @@ async function getCatalog(query, page) {
   var total = -1;
   var tm = /([0-9][0-9.]*)\s*(?:adet\s*)?dizi\s*(?:bulundu|listelendi)/i.exec(plain(html));
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
+  // Toplam sayı (1.0.7): sayfa numaralarındaki en büyük sayfa; ilk sayfada son sayfa bir kez açılıp dizileri sayılır.
+  if (total < 0 && (page || 1) === 1) {
+    var lastPage = 1, pm, pre = /[?&;]s=(\d+)/g, flat = html.replace(/&amp;/g, '&');
+    while ((pm = pre.exec(flat))) lastPage = Math.max(lastPage, parseInt(pm[1], 10));
+    if (lastPage <= 1) {
+      total = items.length;
+    } else if (lastPage < 2000) {
+      try {
+        params.set('s', String(lastPage));
+        var lastHtml = await getPage('/diziler.asp?' + params.toString());
+        var lastItems = readCards(lastHtml);
+        if (lastItems.length) total = (lastPage - 1) * items.length + lastItems.length;
+      } catch (e) {
+        // Sayı yazılmaz, liste yine gelir.
+      }
+    }
+  }
   // Afiş geldiyse kısa satır (uygulama satırı 300 harfte keser; kutu adları sona sığsın).
   var debug = items.length ? 'kod ' + last.status + ' · ' + (last.cf ? last.cf + ' · ' : '') + how : debugLine(how);
   return { items: items, hasMore: hasMore || items.length >= 50, total: total, debug: debug };
 }
 
 module.exports = { getFilters: getFilters, getCatalog: getCatalog };
+  

@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.11). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.12). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -55,9 +55,19 @@ async function getPage(path) {
 
 function opts(list) { return list.map(function (v) { return { value: v, label: v }; }); }
 
-/** Sayfadaki ülke seçenekleri ("Daha fazla" dahil): ulke=... bağlantıları ya da seçenek düğmeleri; yoksa bilinen beş ülke. */
+/**
+ * Sayfadaki ülke seçenekleri. 1.0.12: site bütün ülkeleri (39) sayfanın veri bloğunda tutar, dizi sayısına göre sıralı:
+ * {"id":"Japonya","label":"Japonya","n":1475,"flag":"🇯🇵"}. Bulunamazsa eski yol: ulke=... bağlantıları ve bilinen beş ülke.
+ */
 function readCountries(html) {
   var out = [], seen = {}, m, re = /[?&;]ulke=([^&"'#<\s]+)/g;
+  var data = unescapeData(html), dre = /\{"id":"([^"]{1,40})","label":"[^"]{1,40}","n":\d+,"flag":"[^"]*"\}/g;
+  while ((m = dre.exec(data))) {
+    var id = decode(m[1]).trim();
+    if (id && !seen[id]) { seen[id] = true; out.push(id); }
+  }
+  if (out.length >= 5) return out;
+  out = []; seen = {};
   var flat = html.replace(/&amp;/g, '&');
   while ((m = re.exec(flat))) {
     var v = '';

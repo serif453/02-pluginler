@@ -1,0 +1,155 @@
+/*
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.0). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
+ *
+ * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
+ * (çoklu seçim virgülle; ülke ve tür düz ad). "Daha fazla yükle" yapısı: sayfa arttıkça sonraki diziler gelir.
+ * Site adresi değişirse yalnızca BASE değişir; eski adres yeni adrese yönlendiriyorsa kendiliğinden izlenir.
+ */
+var BASE = 'https://dizilla.la';
+var origin = null;
+var last = { status: 0, size: 0, title: '', host: '', server: '', cf: '' };
+
+var TURLER = ['Aksiyon', 'Aile', 'Animasyon', 'Anime', 'Belgesel', 'Bilim Kurgu', 'Biyografi', 'Dram', 'Fantastik', 'Game-Show',
+  'Gerçeklik', 'Gerilim', 'Gizem', 'Kısa', 'Komedi', 'Korku', 'Macera', 'Müzik', 'Müzikal', 'Pembe Dizi', 'Reality-TV',
+  'Romantik', 'Savaş', 'Spor', 'Suç', 'Talk-Show', 'Tarih', 'Western'];
+var ULKELER = ['Amerika', 'Güney Kore', 'İngiltere', 'Türkiye', 'Japonya'];
+
+function root() { return origin || BASE; }
+
+function decode(text) {
+  return String(text || '')
+    .replace(/&#(\d+);/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); })
+    .replace(/&#x([0-9a-f]+);/gi, function (_, n) { return String.fromCharCode(parseInt(n, 16)); })
+    .replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+function plain(html) {
+  return decode(String(html || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function absolute(url) {
+  if (!url) return null;
+  url = decode(url).trim();
+  if (/^data:/i.test(url)) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.indexOf('//') === 0) return 'https:' + url;
+  try { return new URL(url, root() + '/').href; } catch (e) { return null; }
+}
+
+async function getPage(path) {
+  var res = await fetch(root() + path, {
+    headers: { 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'tr-TR,tr;q=0.9' }
+  });
+  try { if (res.url) origin = new URL(res.url).origin; } catch (e) {}
+  var text = await res.text();
+  last.status = res.status;
+  last.size = text.length;
+  last.title = plain((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(text) || [])[1] || '').slice(0, 80);
+  try { last.host = new URL(res.url || root()).hostname; } catch (e) { last.host = ''; }
+  last.server = (res.headers && res.headers.get('server')) || '';
+  last.cf = (res.headers && res.headers.get('x-02-cf')) || '';
+  return text;
+}
+
+function opts(list) { return list.map(function (v) { return { value: v, label: v }; }); }
+
+/** Sayfadaki ülke seçenekleri ("Daha fazla" dahil): ulke=... bağlantıları ya da seçenek düğmeleri; yoksa bilinen beş ülke. */
+function readCountries(html) {
+  var out = [], seen = {}, m, re = /[?&;]ulke=([^&"'#<\s]+)/g;
+  var flat = html.replace(/&amp;/g, '&');
+  while ((m = re.exec(flat))) {
+    var v = '';
+    try { v = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { continue; }
+    v.split(',').forEach(function (one) {
+      one = one.trim();
+      if (one && !seen[one] && one.length < 30) { seen[one] = true; out.push(one); }
+    });
+  }
+  ULKELER.forEach(function (c) { if (!seen[c]) { seen[c] = true; out.unshift(c); } });
+  return out;
+}
+
+async function getFilters() {
+  var html = '';
+  try { html = await getPage('/ne-izlesem'); } catch (e) {}
+  return {
+    filters: [
+      { id: 'ulke', label: 'Ülke', kind: 'multi', options: opts(readCountries(html)) },
+      { id: 'tur', label: 'Tür', kind: 'multi', options: opts(TURLER) },
+      { id: 'imdb', label: 'IMDb puanı', kind: 'single', options: opts(['6.5', '7', '7.5', '8']).map(function (o) { o.label = o.value.replace('.', ',') + '+'; return o; }) },
+      { id: 'yil', label: 'Yıl / dönem', kind: 'multi', options: [
+        { value: 'y2526', label: '2025–2026' }, { value: 'y20', label: "2020'ler" }, { value: 'y10', label: "2010'lar" }, { value: 'y00', label: "2000'ler" }] },
+      { id: 'yayin', label: 'Yayın durumu', kind: 'multi', options: [{ value: 'on', label: 'Devam ediyor' }, { value: 'bitti', label: 'Bitti' }] },
+      { id: 'sure', label: 'Bölüm süresi', kind: 'multi', options: [
+        { value: 'kisa', label: "30 dk'ya kadar" }, { value: 'orta', label: '31–50 dk' }, { value: 'uzun', label: '50 dk üstü' }] }
+    ],
+    sorts: [],
+    orders: []
+  };
+}
+
+/** Sonuç kartları: dizi sayfasına giden, resimli bağlantılar (ad h2/h3 ya da resmin alt yazısı, rozette IMDb puanı). */
+function readCards(html) {
+  var items = [], seen = {};
+  // Kartlar "N sonuç" yazısından sonra başlar (üstteki menü ve filtre bağlantıları atlanır).
+  var at = html.search(/\d[\d.]*\s*sonu[çc]/i);
+  var area = at > 0 ? html.slice(at) : html;
+  var re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,4000}?)<\/a>/gi, m;
+  while ((m = re.exec(area))) {
+    var href = m[1], inner = m[2];
+    if (!/<img/i.test(inner)) continue;
+    if (/ne-izlesem|\/(oyuncu|dizi-turu|kategori|takvim|reels|akis|giris|kayit|uye)\b/i.test(href)) continue;
+    var title = plain((/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i.exec(inner) || [])[1]) ||
+      decode((/<img[^>]*\balt=["']([^"']+)["']/i.exec(inner) || [])[1] || '').trim();
+    if (!title || title.length > 150 || seen[href]) continue;
+    seen[href] = true;
+    var poster = (/data-src=["']([^"']+)["']/i.exec(inner) || /<img[^>]*\bsrc=["']([^"']+)["']/i.exec(inner) || [])[1];
+    var srcset = (/srcset=["']([^"' ]+)/i.exec(inner) || [])[1];
+    var text = plain(inner);
+    var rating = (/(?:^|\s)(\d{1,2}[.,]\d)(?:\s|$)/.exec(text) || [])[1] || '';
+    items.push({
+      title: title,
+      year: (/\b(19[3-9]\d|20[0-4]\d)\b/.exec(text) || [])[1] || '',
+      poster: absolute(poster) || absolute(srcset),
+      rating: rating.replace(',', '.'),
+      score: '',
+      scoreLabel: '',
+      imdb: ((/(tt\d{5,10})/.exec(inner) || [])[1]) || null
+    });
+  }
+  return items;
+}
+
+async function getCatalog(query, page) {
+  var values = (query && query.values) || {};
+  var params = [];
+  ['imdb', 'ulke', 'tur', 'yil', 'yayin', 'sure'].forEach(function (id) {
+    var list = (values[id] || []).filter(function (v) { return String(v).trim(); });
+    if (list.length) params.push(id + '=' + encodeURIComponent(list.join(',')));
+  });
+  page = page || 1;
+  if (page > 1) params.push('sayfa=' + page);
+  var html;
+  try {
+    html = await getPage('/ne-izlesem' + (params.length ? '?' + params.join('&') : ''));
+  } catch (e) {
+    return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
+  }
+  var items = readCards(html);
+  // Sayfa arttıkça önceki diziler de geliyorsa (birikerek), yalnızca bu sayfanınkiler alınır.
+  if (page > 1 && items.length > 40) {
+    var per = Math.round(items.length / page);
+    if (per > 0 && items.length >= per * (page - 0.5)) items = items.slice(per * (page - 1));
+  }
+  var total = -1;
+  var tm = /(\d[\d.]*)\s*sonu[çc]/i.exec(plain(html));
+  if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
+  var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
+    (last.cf ? ' · ' + last.cf : '') + (items.length ? '' : ' · başlık "' + (last.title || '-') + '"') +
+    ' · afiş ' + items.length + ' · toplam ' + total;
+  return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
+}
+
+module.exports = { getFilters: getFilters, getCatalog: getCatalog };

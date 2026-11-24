@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.1). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.2). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -123,28 +123,64 @@ function readCards(html) {
   return items;
 }
 
+/** Veri bloğundaki kaçışları çözer (\\" -> "). */
+function unescapeData(html) {
+  return html.replace(/\\\\"/g, '"').replace(/\\"/g, '"').replace(/\\\//g, '/').replace(/\\u0026/g, '&');
+}
+
 /**
- * Yedek yol (1.0.1): sonuçlar sayfanın içindeki veri bloğunda (Next.js: __NEXT_DATA__ ya da self.__next_f) duruyorsa
- * ad ve afiş oradan okunur. Veri kaçışlı yazılır (\\"), önce çözülür.
+ * Yedek yol (1.0.2): sonuçlar sayfanın içindeki veri bloğunda (Next.js self.__next_f). Her "poster..." alanının hemen
+ * yakınındaki ad, yıl, puan ve IMDb numarası alınır (alan adları tahmin edilmez, en yakın uygun alan seçilir).
  */
 function readData(html) {
-  var text = html.replace(/\\\\"/g, '"').replace(/\\"/g, '"').replace(/\\\//g, '/').replace(/\\u0026/g, '&');
+  var text = unescapeData(html);
   var items = [], seen = {}, m;
-  var re = /\{[^{}]{0,1500}?"(?:title|name|original_name|originalName)"\s*:\s*"([^"]{1,150})"[^{}]{0,1500}?\}/g;
+  var re = /"([A-Za-z_]*(?:poster|Poster)[A-Za-z_]*)"\s*:\s*"([^"]{4,400})"/g;
   while ((m = re.exec(text))) {
-    var obj = m[0];
-    var poster = (/"(?:poster|posterPath|poster_path|posterUrl|cover|image|thumbnail)"\s*:\s*"([^"]+)"/.exec(obj) || [])[1];
-    if (!poster) continue;
-    var title = decode(m[1]).trim();
-    if (!title || seen[title]) continue;
+    var at = m.index, from = Math.max(0, at - 1500), win = text.slice(from, at + 1500);
+    var pairs = [], pm, pre = /"([A-Za-z_][A-Za-z0-9_]{0,40})"\s*:\s*(?:"([^"]{0,300})"|(-?\d+(?:\.\d+)?))/g;
+    while ((pm = pre.exec(win))) pairs.push({ key: pm[1], str: pm[2], num: pm[3], pos: from + pm.index });
+    function nearest(test) {
+      var best = null;
+      pairs.forEach(function (p) { if (test(p) && (!best || Math.abs(p.pos - at) < Math.abs(best.pos - at))) best = p; });
+      return best;
+    }
+    // Önce "başlık" alanları (tür, ülke gibi iç nesnelerin "name" alanı daha yakın olabilir), sonra "ad" alanları.
+    var t = nearest(function (p) {
+      return p.str && /^(title|original_?title|title_?tr|tr_?title|baslik|dizi_?adi)$/i.test(p.key);
+    }) || nearest(function (p) {
+      return p.str && /^(name|original_?name|name_?tr|adi?)$/i.test(p.key) && p.pos < at;
+    }) || nearest(function (p) { return p.str && /title|name|baslik/i.test(p.key) && !/slug|url|image|poster|genre|country|ulke|tur|network|kanal|actor|oyuncu|user/i.test(p.key); });
+    if (!t) continue;
+    var title = decode(t.str).trim();
+    if (!title || seen[title] || title.length > 150) continue;
     seen[title] = true;
-    var year = (/"(?:year|releaseYear|first_air_date|firstAirDate|release_date|startYear)"\s*:\s*"?(\d{4})/.exec(obj) || [])[1] || '';
-    var rating = (/"(?:imdb|imdbRating|imdb_rating|rating|vote_average|imdbScore)"\s*:\s*"?(\d{1,2}(?:\.\d)?)/.exec(obj) || [])[1] || '';
-    var imdb = (/"(?:imdb_id|imdbId|imdbID)"\s*:\s*"(tt\d{5,10})"/.exec(obj) || [])[1] || null;
-    if (/^\//.test(poster) && /poster_path/.test(obj)) poster = 'https://image.tmdb.org/t/p/w342' + poster;
-    items.push({ title: title, year: year, poster: absolute(poster), rating: rating, score: '', scoreLabel: '', imdb: imdb });
+    var y = nearest(function (p) { return /year|yil|first_?air|release|start|date|tarih/i.test(p.key) && /^(19|20)\d\d/.test(p.str || p.num || ''); });
+    var r = nearest(function (p) {
+      var v = parseFloat(p.str || p.num); return /imdb|rating|puan|vote|score/i.test(p.key) && !/count|votes$/i.test(p.key) && v > 0 && v <= 10;
+    });
+    var imdb = (/(tt\d{5,10})/.exec(text.slice(at - 1500, at + 1500)) || [])[1] || null;
+    var poster = m[2];
+    if (/^\//.test(poster) && /tmdb|poster_path/i.test(m[1])) poster = 'https://image.tmdb.org/t/p/w342' + poster;
+    items.push({
+      title: title,
+      year: y ? String(y.str || y.num).slice(0, 4) : '',
+      poster: absolute(poster),
+      rating: r ? String(parseFloat(r.str || r.num)) : '',
+      score: '', scoreLabel: '', imdb: imdb
+    });
   }
   return items;
+}
+
+/** İlk "poster" alanının yakınındaki alan adları (yalnızca adlar; teşhis satırı için). */
+function keysNearPoster(html) {
+  var text = unescapeData(html);
+  var at = text.search(/"[A-Za-z_]*[Pp]oster[A-Za-z_]*"\s*:/);
+  if (at < 0) return 'poster alanı yok';
+  var win = text.slice(Math.max(0, at - 600), at + 600), seen = {}, out = [], m, re = /"([A-Za-z_][A-Za-z0-9_]{0,30})"\s*:/g;
+  while ((m = re.exec(win))) if (!seen[m[1]]) { seen[m[1]] = true; out.push(m[1]); }
+  return out.slice(0, 30).join(' ');
 }
 
 /** Sayfanın yapısı (teşhis satırı): bağlantı, resim ve veri bloğu sayıları. */
@@ -182,7 +218,7 @@ async function getCatalog(query, page) {
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
     (last.cf ? ' · ' + last.cf : '') + (items.length ? '' : ' · başlık "' + (last.title || '-') + '"') +
-    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? '' : ' · yapı: ' + structure(html));
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? '' : ' · alanlar: ' + keysNearPoster(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.5). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.6). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -76,6 +76,7 @@ async function getFilters() {
   try { html = await getPage('/ne-izlesem'); } catch (e) {}
   return {
     filters: [
+      { id: 'bolge', label: 'Bölge', kind: 'single', options: [{ value: 'yabanci', label: 'Yabancı' }, { value: 'yerli', label: 'Yerli' }] },
       { id: 'ulke', label: 'Ülke', kind: 'multi', options: opts(readCountries(html)) },
       { id: 'tur', label: 'Tür', kind: 'multi', options: opts(TURLER) },
       { id: 'imdb', label: 'IMDb puanı', kind: 'single', options: opts(['6.5', '7', '7.5', '8']).map(function (o) { o.label = o.value.replace('.', ',') + '+'; return o; }) },
@@ -83,9 +84,12 @@ async function getFilters() {
         { value: 'y2526', label: '2025–2026' }, { value: 'y20', label: "2020'ler" }, { value: 'y10', label: "2010'lar" }, { value: 'y00', label: "2000'ler" }] },
       { id: 'yayin', label: 'Yayın durumu', kind: 'multi', options: [{ value: 'on', label: 'Devam ediyor' }, { value: 'bitti', label: 'Bitti' }] },
       { id: 'sure', label: 'Bölüm süresi', kind: 'multi', options: [
-        { value: 'kisa', label: "30 dk'ya kadar" }, { value: 'orta', label: '31–50 dk' }, { value: 'uzun', label: '50 dk üstü' }] }
+        { value: 'kisa', label: "30 dk'ya kadar" }, { value: 'orta', label: '31–50 dk' }, { value: 'uzun', label: '50 dk üstü' }] },
+      { id: 'sezon', label: 'Sezon sayısı', kind: 'multi', options: [
+        { value: 's1', label: '1 sezon' }, { value: 's23', label: '2–3 sezon' }, { value: 's4', label: '4+ sezon' }] }
     ],
-    sorts: [],
+    // Sitenin sıralaması: "Önerilen" adreste yazılmaz; "new" bilinen, diğerleri sonra eklenir.
+    sorts: [{ value: 'onerilen', label: 'Önerilen' }, { value: 'new', label: 'Yeni eklenen' }],
     orders: []
   };
 }
@@ -279,10 +283,12 @@ function structure(html) {
 async function getCatalog(query, page) {
   var values = (query && query.values) || {};
   var params = [];
-  ['imdb', 'ulke', 'tur', 'yil', 'yayin', 'sure'].forEach(function (id) {
+  ['bolge', 'imdb', 'ulke', 'tur', 'yil', 'yayin', 'sure', 'sezon'].forEach(function (id) {
     var list = (values[id] || []).filter(function (v) { return String(v).trim(); });
     if (list.length) params.push(id + '=' + encodeURIComponent(list.join(',')));
   });
+  var sort = query && query.sort;
+  if (sort && sort !== 'onerilen') params.push('sirala=' + encodeURIComponent(sort));
   page = page || 1;
   if (page > 1) params.push('sayfa=' + page);
   var html;
@@ -305,7 +311,7 @@ async function getCatalog(query, page) {
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
     (last.cf ? ' · ' + last.cf : '') +
-    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? ' · alanlar: ' + lastKeys.slice(0, 200) : ' · çevre: ' + posterSnippet(html));
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? ' · resimli ' + items.filter(function (i) { return i.poster; }).length : ' · çevre: ' + posterSnippet(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

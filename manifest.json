@@ -1,6 +1,6 @@
 {
   "name": "02 IPTV katalogları",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "scrapers": [
     {
       "id": "sezonlukdizi",
@@ -16,7 +16,7 @@
     {
       "id": "dizilla",
       "name": "Dizilla",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "filename": "dizilla.js",
       "supportedTypes": [
         "catalog"

@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.6). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.7). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -88,8 +88,11 @@ async function getFilters() {
       { id: 'sezon', label: 'Sezon sayısı', kind: 'multi', options: [
         { value: 's1', label: '1 sezon' }, { value: 's23', label: '2–3 sezon' }, { value: 's4', label: '4+ sezon' }] }
     ],
-    // Sitenin sıralaması: "Önerilen" adreste yazılmaz; "new" bilinen, diğerleri sonra eklenir.
-    sorts: [{ value: 'onerilen', label: 'Önerilen' }, { value: 'new', label: 'Yeni eklenen' }],
+    // Sitenin sıralaması (adreste sirala=…; "Önerilen" yazılmaz).
+    sorts: [
+      { value: 'onerilen', label: 'Önerilen' }, { value: 'imdb', label: 'IMDb puanı' },
+      { value: 'new', label: 'En yeni' }, { value: 'az', label: 'A–Z' }
+    ],
     orders: []
   };
 }

@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek; 1.0.5: kutular kimlik ve benzer adla bulunuyor). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek; 1.0.5: kutular kimlik ve benzer adla bulunuyor; 1.0.6: sitenin süslü kutuları (Semantic UI)). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -87,6 +87,38 @@ function readSelects(html) {
     }
     out[name] = { multiple: /\bmultiple\b/i.test(attrs), options: options };
   }
+  return readDropdowns(html, out);
+}
+
+/**
+ * Sitenin süslü kutuları (Semantic UI "ui dropdown", 1.0.6): değer gizli alanda (<input type="hidden" name="ulke">),
+ * seçenekler altındaki listede (<div class="item" data-value="abd">ABD</div>). Gizli alandan sonraki ilk gizli alana kadar
+ * olan bölümdeki seçenekler o kutunundur.
+ */
+function readDropdowns(html, out) {
+  var re = /<input([^>]*\btype=["']?hidden["']?[^>]*)>/gi, m, marks = [];
+  while ((m = re.exec(html))) {
+    var name = (/\bname=["']?([^"'\s>]+)/i.exec(m[1]) || [])[1];
+    if (name) marks.push({ name: name.replace(/\[\]$/, ''), at: m.index, end: re.lastIndex });
+  }
+  marks.forEach(function (mark, i) {
+    if (out[mark.name] && out[mark.name].options.length) return;
+    var stop = i + 1 < marks.length ? marks[i + 1].at : mark.end + 60000;
+    var part = html.slice(mark.end, Math.min(stop, mark.end + 60000));
+    var options = [], seen = {}, im, ire = /<(div|a|li)([^>]*\bdata-value=["']([^"']*)["'][^>]*)>([\s\S]*?)<\/\1>/gi;
+    while ((im = ire.exec(part))) {
+      if (!/\bitem\b/i.test(im[2])) continue;
+      var value = decode(im[3]).trim();
+      var label = plain(im[4]);
+      if (!value || !label || seen[value] || EMPTY_LABEL.test(label)) continue;
+      seen[value] = true;
+      options.push({ value: value, label: label });
+    }
+    if (!options.length) return;
+    // Çoklu seçim kutusu: gizli alandan hemen önceki kutunun sınıfında "multiple".
+    var before = html.slice(Math.max(0, mark.at - 400), mark.at);
+    out[mark.name] = { multiple: /class=["'][^"']*\bmultiple\b[^"']*["'][^>]*>\s*$/i.test(before) || /\bmultiple\b/i.test(before.slice(-200)), options: options };
+  });
   return out;
 }
 

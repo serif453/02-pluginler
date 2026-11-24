@@ -2,13 +2,12 @@
   "varsayilan": {
     "enAzAfis": 10,
     "acilanAfisOrani": 0.8,
-    "enAzFiltre": 1
+    "enAzFiltre": 1,
+    "engeldeAtla": true
   },
   "dizilla": {
     "secenek": { "ulke": 30, "tur": 20 },
     "enAzSiralama": 4
   },
-  "sezonlukdizi": {
-    "cloudflareAtla": true
-  }
+  "sezonlukdizi": {}
 }

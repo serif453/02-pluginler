@@ -48,6 +48,16 @@ async function check(scraper) {
 
   var plugin = require(path.join(ROOT, scraper.filename));
 
+  // Önce 1. sayfa: site bu makineyi engelliyorsa (Cloudflare kontrolü ya da 403; Dizilla GitHub'ın sunucularını, Sezonluk Dizi
+  // ev bağlantısını engelleyebiliyor) sorun sayılmaz, yalnızca not düşülür. Uygulama telefonda bunları geçebiliyor.
+  var first;
+  try { first = await plugin.getCatalog({ values: {} }, 1); } catch (e) { row('1. sayfa', 'hata: ' + e.message, false); return rows; }
+  var items = (first && first.items) || [];
+  if (!items.length && rules.engeldeAtla && /just a moment|cloudflare|kod 403/i.test((first && first.debug) || '')) {
+    row('Site erişimi', 'site bu makineyi engelliyor, denetlenemedi (' + String(first.debug || '').slice(0, 80) + ')', 'atla');
+    return rows;
+  }
+
   var spec;
   try { spec = await plugin.getFilters(); } catch (e) { row('Filtreler', 'hata: ' + e.message, false); return rows; }
   var filters = (spec && spec.filters) || [];
@@ -60,14 +70,6 @@ async function check(scraper) {
   var sorts = (spec && spec.sorts) || [];
   if (rules.enAzSiralama) row('Sıralama sayısı', sorts.length, sorts.length >= rules.enAzSiralama);
 
-  var first;
-  try { first = await plugin.getCatalog({ values: {} }, 1); } catch (e) { row('1. sayfa', 'hata: ' + e.message, false); return rows; }
-  var items = (first && first.items) || [];
-  // Site Cloudflare kontrolü istiyorsa (uygulama görünmez pencereyle geçer, burada geçilemez) sorun sayılmaz, yalnızca not düşülür.
-  if (!items.length && rules.cloudflareAtla && /just a moment|cloudflare/i.test((first && first.debug) || '')) {
-    row('Cloudflare', 'site kontrol istiyor, buradan denetlenemedi', 'atla');
-    return rows;
-  }
   row('1. sayfa afiş', items.length + (first.debug ? ' (' + first.debug.slice(0, 120) + ')' : ''), items.length >= rules.enAzAfis);
   row('Toplam sonuç', first.total, first.total !== 0);
 

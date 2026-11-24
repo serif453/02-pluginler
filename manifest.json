@@ -1,11 +1,11 @@
 {
   "name": "02 IPTV katalogları",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "scrapers": [
     {
       "id": "sezonlukdizi",
       "name": "Sezonluk Dizi",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "filename": "sezonlukdizi.js",
       "supportedTypes": ["catalog"],
       "catalogType": "tv",

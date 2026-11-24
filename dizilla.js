@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.4). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.5). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -225,12 +225,10 @@ function readRecords(html) {
     var obj = text.slice(start, end + 1);
     var pairs = {}, pm, pre = /"([A-Za-z_][A-Za-z0-9_]{0,30})"\s*:\s*(?:"([^"]*)"|(-?\d+(?:\.\d+)?)|(true|false|null))/g;
     while ((pm = pre.exec(obj))) pairs[pm[1]] = pm[2] !== undefined ? pm[2] : (pm[3] !== undefined ? pm[3] : pm[4]);
-    if (!lastKeys) lastKeys = Object.keys(pairs).join(' ');
+    if (!lastKeys) lastKeys = Object.keys(pairs).join(' ') + ' | ilk: ' + (pairs.t || '') + ' tid=' + (pairs.tid || '') + ' orig=' + (pairs.orig || '');
     var img = pairs.img || pairs.poster || pairs.image || pairs.cover || '';
     if (!img) continue;
-    // Kayıttaki resim 100 piksellik küçük kopya (ampproject üzerinden): sitenin kendi 384x576 boyutu kullanılır.
-    var big = /images\.macellan\.online\/images\/tv\/poster\/(?:[^\/"]+\/){1,3}([^\/"?#]+)$/.exec(img);
-    if (big) img = 'https://images.macellan.online/images/tv/poster/384/576/80/' + big[1];
+    // Kayıttaki adres olduğu gibi (1.0.5): sitenin büyük resim sunucusu başka uygulamaya resim vermiyor.
     seen[slug] = true;
     var titleKey = ['title', 'name', 'tr_title', 'title_tr', 'trTitle', 'original_title', 'originalTitle', 'original_name', 'baslik', 't', 'n']
       .filter(function (k) { return typeof pairs[k] === 'string' && /[A-Za-zÇĞİÖŞÜçğıöşü0-9]/.test(pairs[k]) && !/^\//.test(pairs[k]); })[0];
@@ -307,7 +305,7 @@ async function getCatalog(query, page) {
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
     (last.cf ? ' · ' + last.cf : '') +
-    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? ' · alanlar: ' + lastKeys.slice(0, 120) : ' · çevre: ' + posterSnippet(html));
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? ' · alanlar: ' + lastKeys.slice(0, 200) : ' · çevre: ' + posterSnippet(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

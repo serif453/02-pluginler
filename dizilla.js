@@ -1,5 +1,5 @@
 /*
- * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.3). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
+ * Dizilla katalog plugini (02 IPTV, 2026-11-24, 1.0.4). "Ne izlesem?" sayfasının listesini ve filtrelerini okur; hiçbir video
  * adresi vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * Adres: /ne-izlesem?imdb=6.5&ulke=İngiltere&tur=Komedi&yil=y20,y2526&yayin=on,bitti&sure=orta,uzun&sayfa=2
@@ -206,6 +206,52 @@ function readPosterUrls(html) {
   return items;
 }
 
+/**
+ * 1.0.4: sayfadaki dizi kayıtları ({…,"seasons":1,"eps":10,"img":"…/tv/poster/…","url":"/dizi/band-of-brothers",…}).
+ * Kaydın sınırı en yakın { ve }; ad alanı yoksa ad adresten çıkarılır (band-of-brothers -> Band Of Brothers).
+ */
+var lastKeys = '';
+function slugTitle(slug) {
+  return slug.replace(/-\d+$/, '').split('-').filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
+}
+function readRecords(html) {
+  var text = unescapeData(html);
+  var items = [], seen = {}, m, re = /"url"\s*:\s*"\/dizi\/([^"\/?#]+)\/?"/g;
+  while ((m = re.exec(text))) {
+    var slug = m[1];
+    if (seen[slug]) continue;
+    var start = text.lastIndexOf('{', m.index), end = text.indexOf('}', m.index);
+    if (start < 0 || end < 0 || m.index - start > 3000 || end - m.index > 3000) continue;
+    var obj = text.slice(start, end + 1);
+    var pairs = {}, pm, pre = /"([A-Za-z_][A-Za-z0-9_]{0,30})"\s*:\s*(?:"([^"]*)"|(-?\d+(?:\.\d+)?)|(true|false|null))/g;
+    while ((pm = pre.exec(obj))) pairs[pm[1]] = pm[2] !== undefined ? pm[2] : (pm[3] !== undefined ? pm[3] : pm[4]);
+    if (!lastKeys) lastKeys = Object.keys(pairs).join(' ');
+    var img = pairs.img || pairs.poster || pairs.image || pairs.cover || '';
+    if (!img) continue;
+    // Kayıttaki resim 100 piksellik küçük kopya (ampproject üzerinden): sitenin kendi 384x576 boyutu kullanılır.
+    var big = /images\.macellan\.online\/images\/tv\/poster\/(?:[^\/"]+\/){1,3}([^\/"?#]+)$/.exec(img);
+    if (big) img = 'https://images.macellan.online/images/tv/poster/384/576/80/' + big[1];
+    seen[slug] = true;
+    var titleKey = ['title', 'name', 'tr_title', 'title_tr', 'trTitle', 'original_title', 'originalTitle', 'original_name', 'baslik', 't', 'n']
+      .filter(function (k) { return typeof pairs[k] === 'string' && /[A-Za-zÇĞİÖŞÜçğıöşü0-9]/.test(pairs[k]) && !/^\//.test(pairs[k]); })[0];
+    var title = titleKey ? decode(pairs[titleKey]).trim() : slugTitle(slug);
+    var year = '';
+    ['year', 'yil', 'y', 'firstAirYear', 'first_air_year', 'release', 'date', 'first_air_date', 'start'].some(function (k) {
+      var v = String(pairs[k] || ''); if (/^(19|20)\d\d/.test(v)) { year = v.slice(0, 4); return true; } return false;
+    });
+    if (!year) { var ym = /"[A-Za-z_]*(?:year|yil|date|tarih)[A-Za-z_]*"\s*:\s*"?((?:19|20)\d\d)/i.exec(obj); if (ym) year = ym[1]; }
+    var rating = '';
+    ['imdb', 'imdbRating', 'imdb_rating', 'imdbScore', 'rating', 'score', 'puan', 'vote', 'vote_average', 'r'].some(function (k) {
+      var v = parseFloat(pairs[k]); if (v > 0 && v <= 10) { rating = String(v); return true; } return false;
+    });
+    items.push({
+      title: title, year: year, poster: absolute(img), rating: rating, score: '', scoreLabel: '',
+      imdb: (/(tt\d{5,10})/.exec(obj) || [])[1] || null
+    });
+  }
+  return items;
+}
+
 /** İlk "poster" geçen yerin çevresi (teşhis için; sitenin herkese açık katalog verisi). */
 function posterSnippet(html) {
   var text = unescapeData(html);
@@ -247,9 +293,10 @@ async function getCatalog(query, page) {
   } catch (e) {
     return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
   }
-  var items = readCards(html), how = 'kart';
+  // Önce sayfadaki dizi kayıtları (1.0.4, sitenin asıl yapısı), sonra yedek yollar.
+  var items = readRecords(html), how = 'kayıt';
+  if (!items.length) { items = readCards(html); how = 'kart'; }
   if (!items.length) { items = readData(html); how = 'veri'; }
-  if (!items.length) { items = readPosterUrls(html); how = 'resim adresi'; }
   // Sayfa arttıkça önceki diziler de geliyorsa (birikerek), yalnızca bu sayfanınkiler alınır.
   if (page > 1 && items.length > 40) {
     var per = Math.round(items.length / page);
@@ -260,7 +307,7 @@ async function getCatalog(query, page) {
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
   var debug = 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
     (last.cf ? ' · ' + last.cf : '') +
-    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (how === 'kart' && items.length ? '' : ' · çevre: ' + posterSnippet(html));
+    ' · afiş ' + items.length + ' (' + how + ') · toplam ' + total + (items.length ? ' · alanlar: ' + lastKeys.slice(0, 120) : ' · çevre: ' + posterSnippet(html));
   return { items: items, hasMore: items.length > 0 && (total < 0 || page * items.length < total), total: total, debug: debug };
 }
 

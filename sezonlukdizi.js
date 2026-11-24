@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -10,6 +10,8 @@
  */
 var BASE = 'https://sezonlukdizi.cc';
 var origin = null;
+// Son isteğin özeti (uygulamanın testinde ve boş listede görünür): cevap kodu, boyut, sayfa başlığı, sunucu.
+var last = { status: 0, size: 0, title: '', host: '', server: '' };
 
 var LABELS = { adi: 'Dizi adı', kat: 'Kategori', tur: 'Tür', ulke: 'Ülke', tv: 'TV kanalı', durum: 'Dizi durumu', dil: 'Dil' };
 var SELECT_ORDER = ['kat', 'tur', 'ulke', 'tv', 'durum', 'dil'];
@@ -27,7 +29,18 @@ async function getPage(path) {
     headers: { 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'tr-TR,tr;q=0.9' }
   });
   try { if (res.url) origin = new URL(res.url).origin; } catch (e) {}
-  return await res.text();
+  var text = await res.text();
+  last.status = res.status;
+  last.size = text.length;
+  last.title = plain((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(text) || [])[1] || '').slice(0, 80);
+  try { last.host = new URL(res.url || root()).hostname; } catch (e) { last.host = ''; }
+  last.server = (res.headers && res.headers.get('server')) || '';
+  return text;
+}
+
+function debugLine(extra) {
+  return 'kod ' + last.status + ' · ' + Math.round(last.size / 1024) + ' KB · ' + (last.host || '?') +
+    (last.server ? ' · sunucu ' + last.server : '') + ' · başlık "' + (last.title || '-') + '"' + (extra ? ' · ' + extra : '');
 }
 
 function decode(text) {
@@ -190,15 +203,22 @@ async function getCatalog(query, page) {
   params.append('siralama_tipi', (query && query.sort) || 'imdb');
   params.append('siralama_turu', (query && query.order) || 'desc');
   params.append('s', String(page || 1));
-  var html = await getPage('/diziler.asp?' + params.toString());
+  var html;
+  try {
+    html = await getPage('/diziler.asp?' + params.toString());
+  } catch (e) {
+    return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
+  }
+  var cards = (html.match(/class=["'][^"']*\bafis\b/gi) || []).length;
   var items = readCards(html);
-  if (!items.length) items = readLinks(html);
+  var how = 'afiş ' + items.length + '/' + cards;
+  if (!items.length) { items = readLinks(html); how += ' · yedek ' + items.length; }
   var next = String((page || 1) + 1);
   var hasMore = new RegExp('[?&;]s=' + next + '(?![0-9])').test(html.replace(/&amp;/g, '&'));
   var total = -1;
   var tm = /([0-9][0-9.]*)\s*(?:adet\s*)?dizi\s*(?:bulundu|listelendi)/i.exec(plain(html));
   if (tm) total = parseInt(tm[1].replace(/\./g, ''), 10);
-  return { items: items, hasMore: hasMore || items.length >= 50, total: total };
+  return { items: items, hasMore: hasMore || items.length >= 50, total: total, debug: debugLine(how) };
 }
 
 module.exports = { getFilters: getFilters, getCatalog: getCatalog };

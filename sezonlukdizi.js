@@ -1,5 +1,5 @@
 /*
- * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
+ * Sezonluk Dizi katalog plugini (02 IPTV, 2026-11-23; 1.0.1: teşhis satırı; 1.0.2: Cloudflare adımı teşhiste; 1.0.3: afiş kutusu düzeltildi; 1.0.4: kapanmayan seçenekler, boş kutuda bağlantılardan seçenek). Yalnızca dizi listesini ve filtrelerini okur; hiçbir video adresi
  * vermez. Uygulama afişe basınca diziyi TMDB'de bulur, kaynaklar kullanıcının kendi eklentilerinden gelir.
  *
  * getFilters(): sitenin "Gelişmiş Dizi Arama" kutularındaki seçenekler (sayfadan okunur: site yeni tür ya da kanal eklerse
@@ -74,7 +74,8 @@ function readSelects(html) {
     var name = (/\bname=["']?([^"'\s>]+)/i.exec(attrs) || [])[1];
     if (!name) continue;
     name = name.replace(/\[\]$/, '');
-    var options = [], om, ore = /<option([^>]*)>([\s\S]*?)<\/option>/gi;
+    // Seçenekler kapanış etiketi olmadan da yazılabilir (<option value=1>Yabancı): yazı bir sonraki etikete kadar okunur.
+    var options = [], om, ore = /<option([^>]*)>([^<]*)/gi;
     while ((om = ore.exec(m[2]))) {
       var value = (/\bvalue=["']([^"']*)["']/i.exec(om[1]) || /\bvalue=([^\s>]+)/i.exec(om[1]) || [])[1];
       var label = plain(om[2]);
@@ -105,13 +106,37 @@ function readSorts(html, selects) {
   return sorts;
 }
 
+/**
+ * Kutu boşsa (seçenekleri sayfanın kodu sonradan dolduruyorsa) sayfadaki bağlantılardan toplanır: `diziler.asp?ulke=abd`
+ * gibi bağlantıların değeri ve yazısı.
+ */
+function harvest(html, name) {
+  var out = [], seen = {}, m;
+  var re = new RegExp('<a[^>]+href=["\'][^"\']*[?&;]' + name + '=([^&"\'#]+)[^"\']*["\'][^>]*>([\\s\\S]{0,200}?)<\\/a>', 'gi');
+  while ((m = re.exec(html))) {
+    var value = decode(decodeURIComponent(m[1].replace(/\+/g, ' '))).trim();
+    var label = plain(m[2]);
+    if (!value || !label || seen[value] || label.length > 40) continue;
+    seen[value] = true;
+    out.push({ value: value, label: label });
+  }
+  return out;
+}
+
+/** Kutuların okunan seçenek sayıları (teşhis satırı için). */
+function selectSummary(html) {
+  var selects = readSelects(html);
+  return SELECT_ORDER.map(function (name) { return name + ' ' + (selects[name] ? selects[name].options.length : '-'); }).join(', ');
+}
+
 async function getFilters() {
   var html = await getPage('/diziler.asp');
   var selects = readSelects(html);
   var filters = [{ id: 'adi', label: LABELS.adi, kind: 'text' }];
   SELECT_ORDER.forEach(function (name) {
     var sel = selects[name];
-    var options = sel ? sel.options : (name === 'kat' ? KAT_FALLBACK : []);
+    var options = sel && sel.options.length ? sel.options : harvest(html, name);
+    if (!options.length && name === 'kat') options = KAT_FALLBACK;
     if (!options.length) return;
     var multi = name === 'tur' || (sel && sel.multiple);
     filters.push({ id: name, label: LABELS[name] || name, kind: multi ? 'multi' : 'single', options: options });
@@ -221,7 +246,7 @@ async function getCatalog(query, page) {
     return { items: [], hasMore: false, total: -1, debug: 'bağlantı: ' + String((e && e.message) || e).slice(0, 150) };
   }
   var items = readCards(html);
-  var how = 'afiş ' + items.length;
+  var how = 'afiş ' + items.length + ' · kutular: ' + selectSummary(html);
   if (!items.length) { items = readLinks(html); how += ' · yedek ' + items.length; }
   var next = String((page || 1) + 1);
   var hasMore = new RegExp('[?&;]s=' + next + '(?![0-9])').test(html.replace(/&amp;/g, '&'));

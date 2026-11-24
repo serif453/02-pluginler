@@ -1,0 +1,25 @@
+# Katalog pluginlerinin günlük denetimi: her sabah, plugin değişince ve elle. Bir kontrol tutmazsa iş kırmızı olur ve
+# GitHub depo sahibine e-posta atar. Ayrıntılı tablo işin "Summary" sayfasında.
+name: Plugin denetimi
+
+on:
+  schedule:
+    - cron: '17 5 * * *'   # her gün 08:17 (Türkiye)
+  push:
+    branches: [main]
+    paths: ['*.js', 'manifest.json', 'denetim/**', '.github/workflows/denetim.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  denetim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node denetim/denetle.js
